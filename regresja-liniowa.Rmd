@@ -1,0 +1,384 @@
+---
+title: "Regresja i analiza wariancji"
+author:
+  name: Jakub Michalik, Kamil K.
+  affiliation: Matematyka stosowana
+subtitle: Regresja liniowa i wieloraka
+output:
+  html_document:
+    theme: paper
+    df_print: paged
+    toc: true
+    toc_float: true
+
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(ISLR)
+library(kableExtra)
+library(GGally)
+library(knitr)
+library(lmtest)
+library(corrplot)
+library(olsrr)
+library(caret)
+library(plotly)
+```
+
+# Regresja liniowa
+
+## Przedstawienie oraz opis danych
+
+```{r, warning=FALSE}
+house <- read.csv('C:/Users/Kuba/Downloads/house.csv', header = TRUE)
+head(house)
+```
+
+Zbiór `house` przedstawia ceny domów w Stanach Zjednoczonych.
+Niektóre istotne kolumny w zbiorze danych:
+
+- `AvgAreaIncome` - średni dochód powierzchniowy mieszkańców domu w [$],
+- `HouseAge` - wiek domu,
+- `NumberOfRooms` - liczba pokoi (średnia),
+- `NumberOfBedooms` - liczba sypialni (średnia),
+- `AreaPopulation` - liczba ludności w dzielncy/regionie, w której znajduje się dany dom,
+- `Price` -  cena domu w [$].
+
+
+```{r}
+kable(summary(house), escape = F) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Założenia
+
+### Zależność liniowa
+
+Przekształcamy *"tibbl'a"* ze wszystkimi zmiennymi na mniejszą wersję, zawierającą wyłącznie zmienne ciągłe (usuwamy kolumnę `Address`).
+
+```{r}
+data(house)
+ggpairs(house[, c(1:6)])
+```
+
+Powyższy wykres przedstawia zależności pomiędzy wszystkimi ciągłymi zmiennymi.  Można zauważyć, że istnieje kilka znacznych korelacji. Jedna, która wyróżnia się ponad innymi to ta pomiędzy zmienną `Price` i `AvgAreaIncome` ze współczynnikiem korelacji Pearsona równym $0,641$. Korelacje te są dość istotne, ponieważ wartość współczynnika jest bliska $1$ dla współczynnika dodatniego. Dlatego ceny domów w Stanach Zjednoczonych będziemy przewidywać na podstawie zmiennej `Avg..Area.Income`. Innymi słowy zmienna `Price` to zmienna objaśniana, a `Avg..Area.Income` objaśniająca.
+
+### Rozkłady zmiennych
+
+Sprawdzimy teraz rozkład tych dwóch zmiennych za pomocą histogramów.
+
+
+```{r}
+ggplot(house, aes(x=Price))+
+  labs(title = 'Histogram cen domów',
+       x = 'Cena',
+       y = 'Częstotliwość') + 
+  geom_histogram(aes(y=..density..),
+                 color="khaki1", 
+                 fill="mediumslateblue", 
+                 binwidth = 50000) +
+  geom_density(alpha=.45, fill="springgreen4") +
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+ggplot(house, aes(x=Avg..Area.Income))+
+  labs(title = 'Histogram średniego dochodu powierzchniowego w domu',
+       x = 'Średni dochód powierzchniowy w domu',
+       y = 'Częstotliwość') + 
+  geom_histogram(aes(y=..density..),
+                 color="khaki1", 
+                 fill="mediumslateblue", 
+                 binwidth = 2100) +
+  geom_density(alpha=.45, fill="springgreen4") +
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Wizualizując rozkłady tych dwóch zmiennych możemy domyśleć się, że posiadają rozkład normalny. Dla potwierdzenia naszej hipotezy użyjemy testu Shapiro-Wilka, który zakłada, że zmienna posiada rozkład normalny.
+
+
+```{r}
+shapiro.test(house$Price)
+shapiro.test(house$Avg..Area.Income)
+```
+
+Wnioskując, w obu przypadkach otrzymaliśmy $p$-value $> 0,05$, zatem nie mamy podstaw do odrzucenia $H_0$.
+
+
+```{r}
+scatter_plot <- plot_ly(data = house, x = ~Avg..Area.Income, y = ~Price, color = ~Price) %>%
+layout(title = 'Wykres punktowy zależności ceny domu od średniego dochodu powierzchniowego', plot_bgcolor = "#e5ecf6")
+scatter_plot 
+```
+
+Wykres nie wyklucza zależności liniowej pomiędzy zmiennymi `Price` i `Avg..Area.Income`, więc przejdziemy do stworzenia modelu regresji liniowej tych zmiennych.
+
+
+### Model regresji liniowej
+
+```{r}
+lmfit1 <- lm(Price~Avg..Area.Income, data = house)
+summary(lmfit1)
+```
+
+Z naszego modelu, możemy wywnioskować:
+
+- współczynnik kierunkowy $\beta_1$ w naszym modelu regresji wynosi $21,28$, natomiast $\beta_0$ czyli wyraz wolny $-226200$, czyli wraz ze wzrostem średniego dochodu powierzchniowego w domu rośnie jego cena,
+-  $[***]$ przy współczynniku $\beta_1$ oznacza, że średni dochód powierzchniowy w domu ma istotny wpływ na cenę,
+-  błąd resztowy (odchylenie standardowe składnika resztowego) wynosi $272100 \; \$$ co oznacza, że wartości obliczone na podstawie modelu różnią się od rzeczywistości średnio 
+$\pm\; 272100 \; \$$,
+- współczynnik determinacji $(R^2)$ informuje nas o tym, jaki procent wariancji zmiennej objaśnianej został wyjaśniony przez funkcję regresji, Współczynnik  $R^2$ (multiple R-squared) wynosi $0,4114$ czyli średni dochód powierzchniowy mieszkańców domu wyjaśnia $41,14\%$  zmienności ceny.
+
+
+### Rozkład reszt 
+
+```{r}
+ggplot(lmfit1, aes(x=resid(lmfit1)))+
+  labs(title = 'Histogram reszt modelu',
+       x = 'Reszty',
+       y = 'Częstotliwość') + 
+  geom_histogram(aes(y=..density..),
+                 color="khaki1", 
+                 fill="mediumslateblue", 
+                 binwidth = 50000) +
+  geom_density(alpha=.45, fill="springgreen4") +
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+ggplot(lmfit1, aes(sample=lmfit1$residuals)) + 
+  geom_qq() + 
+  geom_qq_line(color = 'red') + 
+  labs(title='Wykres kwartyl-kwartyl reszt', x='Kwartyle teoretyczne', y='Kwartyle próbkowe')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+shapiro.test(lmfit1$residuals)
+```
+
+Wszystkie metody użyte przez nas świadczą o tym, że reszty naszego modelu posiadają rozkład normalny. 
+
+### Zerowa średnia reszt
+
+Do sprawdzenia zerowej średniej reszt użyjemy testu *t-studenta*.
+
+```{r}
+t.test(lmfit1$residuals)
+```
+
+W tym wypadku test t-student wykazał, że średnia jest równa zero. 
+
+```{r}
+ggplot(lmfit1, aes(.fitted, .resid)) + 
+  geom_point() + 
+  stat_smooth(method='loess', formula=y~x, se=F) +
+  geom_hline(yintercept=0, linetype='dashed', color='red') +
+  labs(title='Wykres zależności reszt od dopasowanych wartości', 
+       x='Dopasowane wartości',
+       y='Reszty')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Patrząc na wykres zależności reszt od dopasowanych wartości możemy zauważyć większe odchylenia dla małych jak i dużych wartości zmiennej objaśnianej (`Price`).
+
+
+### Niezależność reszt
+
+W celu sprawdzenia niezależności reszt przeprowadzimy test *Durbin-Watson'a*.
+```{r}
+lmtest::dwtest(lmfit1)
+```
+
+W naszym przypadku $p$-value $> 0,05$, więc nie mamy podstaw, aby odrzucić hipotezę o niezależności w resztach. 
+
+
+### Homoskedastyczność
+
+Aby sprawdzić homoskedastyczność posłuży nam wykres zależności pierwiastka standaryzowanych reszt od dopasowanych wartości.
+
+```{r}
+lmfit1 %>%
+ggplot(aes(.fitted, sqrt(abs(.stdresid)))) + 
+  geom_point() + stat_smooth(method='loess', formula=y~x, se=F) +
+  labs(title='Zależność pierwiastka standaryzowanych reszt od dopasowanych wartości', x='Dopasowane wartości', y='Pierwiastek standaryzowanych reszt')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Rozrzut reszt na wykresie jest mniej więcej równy dla wszystkich dopasowanych wartości. Widzimy odchylenie na początku niebieskiej prostej. Jest ono spowodowane wartością odstającą. Deszty są równomiernie rozrzucone wokół niebieskiej linii. Dla pewności przeprowadzimy test *Breusch-Pagan'a*, który za hipotezę zerową zakłada homoskedastyczność reszt.
+
+```{r}
+lmtest::bptest(lmfit1)
+```
+
+$P$-value $> 0,05$, więc zakładamy homoskedastyczność reszt. 
+
+## Podsumowanie
+
+Słowem podsumowania stwierdzamy, że powyższy model regresji liniowej jest zgodny z naszymi założeniami. Korzystająć ze współczynnika korelacji Pearsona dopasowaliśmy zmienną objaśniającą (`Avg..Area.Income`).
+Przewidywana zmienna `Price` jest najbardziej zależna od zmiennej `Avg..Area.Income`. Analiza reszt pokazała, że model jest zgodny założeniami i ma postać:
+
+$Price = -226200 + 21,28 \cdot Avg..Area.Income$
+
+----------------------------------------------------------------------
+
+# Regresja wieloraka
+
+Spójrzmy raz jeszcze na nasz zbiór danych.
+
+```{r}
+head(house)
+```
+
+Ze względnu na to, że w naszym modelu nie może byc zmiennych jakościowych, wybieramy tylko zmienne ilościowe przy pomocy funkcji `select()`.
+
+```{r}
+new_house <- house %>% 
+                select(Avg..Area.Income, House.Age, Number.of.Rooms, Number.of.Bedrooms, Area.Population, Price)
+
+head(new_house)
+```
+
+## Model regresji wielorakiej
+
+```{r}
+lmfit2 <- lm(Price~., data = new_house)
+summary(lmfit2)
+```
+Dzięki funkcji `summary()` odczytujemy, że $R^2$ naszego modelu wynosi $0,9187$. 
+Tak zbudowany model wyjaśnia $91,87\%$ zmienności bieżącej ceny, ale nie wszystkie zmienne są w tym modelu istotne.
+
+Zinterpretujmy nasze wyniki:
+
+- średni dochód mieszkańców domu zwiększa jego cenę średnio o $21,61 \; \$$,
+- im mniejszy wiek domu tym zwiększa się jego wartość średnio o $165300 \; \$$,
+- ilość pokoi w domu zwiększa jego wartość średnio o $121100 \; \$$,
+- ilość sypialni w domu zwiększa jego wartość średnio o $1458 \; \$$,
+- liczność populacji zwiększa wartość domu średnio o $15,19 \; \$$,
+
+
+## Algorytm AIC
+
+Wykorzystamy współczynnik informacyjny `Akaike'a` `(AIC)`. Jest to estymator błędu przewidywania. Biorąc pod uwagę zbiór modeli dla danych, `AIC` szacuje jakość każdego modelu, w stosunku do każdego z pozostałych modeli. W ten sposób `AIC` dostarcza środków do wyboru modelu. Dzięki niemu uzyskamy najlepszą możliwą dla nas jakość modelu poprzez eliminację następnych zmiennych. Skorzystamy z powyższego algorytmu przy pomocy funkcji `step()`. Algorytm będzie działał na zasadzie procedury eliminacji wstecznej.
+
+```{r}
+ step(lmfit2, direction = "backward")
+```
+Jak widzimy kolejno usuwamy zmienne, które w naszym modelu mają najmniejszą wartość `AIC`, najpierw był to *Number.of.Bedrooms*. Dochodzimy do momentu w algorytmie gdzie najniższą wartość `AIC` ma `<none>` zatem poniższe zmienne zostają w naszym modelu regresji wielorakiej. Widzimy, że dla wszystkich zmiennych $R^2$ wynosi $0,9187$. Sprawdźmy teraz ile wynosi nasz $R^2$ dla naszego gotowego modelu, po redukcji tej zmiennej zmiennych:
+
+
+```{r}
+new_lmfit2 <- lm(Price~ Avg..Area.Income + House.Age + Area.Population + Number.of.Rooms, data= new_house)
+summary(new_lmfit2)
+```
+Nasz współczynnik $R^2$ dla obu modeli jest cały czas taki sam, zatem zmienna `Number.of.Bedrooms` nie ma wpływu istotnie na jakość modelu. Natomiast pozostałe zmienne są istotne dlatego nie odrzuciliśmy ich przy użyciu algorytmu`AIC`.
+
+## Przykład z usunięciem zmiennej objaśniającej
+
+```{r}
+new_lmfit2_no_avg <- lm(Price~ House.Age  + Area.Population  + Number.of.Rooms, data=new_house)
+summary(new_lmfit2_no_avg)
+```
+Jak widzimy powyżej, nasz $R^2$ znacznie zmalał, co oznacza iż ten nowy model objaśnia tylko $49,41\%$ zmienności bieżacej ceny domów.  Jest to niekorzystne w wypadku gdy możemy objaśniać aż $91,87\%$ ceny.
+
+## Założenia
+
+### Badanie współliniowości
+
+Omówmy temat współliniowości zmiennych objaśniających:
+
+```{r}
+ols_vif_tol(new_lmfit2)
+```
+Kolumna `Tolerance` wskazuje wartość procentową niewyjaśnionej zmienności danej zmiennej przez pozostałe zmienne objaśniające. Dla przykładu: współczynnik tolerancji dla `Avg..Area.Income` wynosi $0.9997982	$  co oznacza, że $99,97\%$ zmienności `Avg..Area.Income` nie jest wyjaśnione przez pozostałe zmienne w modelu.
+Kolumna `VIF` jest obliczana na podstawie wartości współczynnika tolerancji i pokazuje o ile wariancja
+szacowanego współczynnika regresji jest podwyższona z powodu współliniowości danej zmiennej objaśniającej z pozostałymi zmiennymi objaśniającymi.
+Wszystkie zmienne mają `VIF` na podobnym poziomie w granicach $1.0$ zatem nie wskazują współliniowości 
+ (`VIF` $> 4$ wskazuje na współliniowość zmienncyh, także u nas takie zmienne nie występują).
+
+
+### Normalność reszt
+
+Sprawdźmy normalność naszych reszt:
+
+```{r}
+ggplot(lmfit2, aes(x=resid(lmfit2)))+
+  labs(title = 'Histogram reszt modelu',
+       x = 'Reszty',
+       y = 'Częstotliwość') + 
+  geom_histogram(aes(y=..density..),
+                 color="khaki1", 
+                 fill="mediumslateblue", 
+                 binwidth = 18000) +
+  geom_density(alpha=.2, fill="springgreen4") +
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Reszty w naszym modelu wydają się być zbliżone do rozkładu normalnego, natomiast nie możemy tego stwierdzić w 100%. Sprawdźmy wykres *QQ-plot* do zbadania rozkładu normalnego naszych zmiennych.
+
+```{r}
+ggplot(new_lmfit2, aes(sample=new_lmfit2$residuals)) + 
+  geom_qq() + 
+  geom_qq_line(color = 'red') + 
+  labs(title='Wykres kwartyl-kwartyl reszt', x='Kwartyle teoretyczne', y='Kwartyle próbkowe')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Widzimy, że prawie wszystkie punkty leżą na czerwonej lini, jedynie problem jest na początku oraz na końcu.
+
+### Zależność reszt
+
+```{r}
+new_lmfit2 %>%
+ggplot(aes(.fitted, .resid)) + 
+  geom_point() + 
+  stat_smooth(method='loess', formula=y~x, se=F) +
+  geom_hline(yintercept=0, linetype='dashed', color='red') +
+  labs(title='Wykres zależności reszt od dopasowanych wartości', 
+       x='Dopasowane wartości',
+       y='Reszty')+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Na wykresie zależności reszt od dopasowanych wartości możemy zauważyć delikatne odchylenie w początkowej jego fazie. Innymi słowy, współczynniki modelu regresji powinny być godne zaufania i nie musimy wykonywać transformacji na danych.
+
+### Identyfikacja wartości odstających
+
+```{r}
+ols_plot_cooksd_bar(new_lmfit2)
+```
+
+```{r}
+ols_plot_resid_stud_fit(new_lmfit2)
+```
+
+Przypisanie tej funkcji do obiektu zwraca nam tabelę z numerami zidentyfikowanych obserwacji wpływowych. Sposób ten pozwala nam na identyfikację punktów, które negatywnie wpływają na model regresji są one oznaczone kolorem czerwonym. Miara jest kombinacją wartości dźwigni i reszt każdej obserwacji; im wyższa dźwignia i reszty, tym wyższa odległość Cooka.
+
+
+### Homoskedastyczność
+
+```{r}
+new_lmfit2 %>%
+ggplot(aes(.fitted, sqrt(abs(.stdresid)))) + 
+  geom_point() + stat_smooth(method='loess', formula=y~x, se=F) +
+  labs(title='Zależność pierwiastka standaryzowanych reszt od dopasowanych wartości', x='Dopasowane wartości', y='Pierwiastek standaryzowanych reszt')
+```
+
+Na powyższym wykresie zależności pierwiastka standaryzowanych reszt od dopasowanych wartości, możemy zauważyć, iż wartości są rozmieszczone mniej więcej w takim samym odstępie od niebieskiej linii. Nie wykluczamy, więc homoskedastyczności. Dla pewności przeprowadźmy test *Breusch-Pagan'a*:
+
+```{r}
+lmtest::bptest(new_lmfit2)
+```
+
+Nie mamy wystarczających dowodów, aby stwierdzić, że heteroskedastyczność występuje w naszym modelu regresji, zatem możemy założyć homoskedastyczność.
+
+## Podsumowanie
+Stworzony przez nas model spełnia wszystkie założenia.
+Korzystając z algorytmu `AIC` dobraliśmy najlepszy możliwy model regresji wielorakiej, który dany jest wzorem:
+
+$Price = -2640000 + 21,61 \cdot Avg..Area.Income + 165400 \cdot House.Age +\\+ 15,19 \cdot Area.Population + 122000 \cdot Number.of.Rooms$
