@@ -1,3 +1,3 @@
-# regresja-liniowa
+# Linear regression
 
-Projekt, który stworzyłem wraz z kolegą w ramach zajęć z przedmiotu "Regresja i analiza wariancji". Napisany został przy pomocy `RMarkdown`. Chcieliśmy skupić szczególną uwagę na wizualizację danych, dlatego skorzystaliśmy z kilku bibliotek, które przedstawiają je w prosty do zrozumienia sposób (np. *knitr* oraz *plotly*).
+A project I created with a colleague as part of a class in the subject "Regression and analysis of variance". It was written using `RMarkdown`. We wanted to focus special attention on data visualization, so we used several libraries that present the data in an easy-to-understand way (such as *plotly*).
